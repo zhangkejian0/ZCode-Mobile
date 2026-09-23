@@ -2,4 +2,5 @@
 <resources>
     <item name="zcode_webview_theme" type="id" />
     <item name="zcode_webview_loaded_url" type="id" />
+    <item name="zcode_webview_file_callback" type="id" />
 </resources>

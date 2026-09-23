@@ -26,3 +26,6 @@ keystore.properties
 /app-onboarding/
 /.agents/
 /skills-lock.json
+
+# device logcat captures
+*.log

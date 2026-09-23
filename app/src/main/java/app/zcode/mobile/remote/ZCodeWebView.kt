@@ -1,6 +1,7 @@
 package app.zcode.mobile.remote
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.MutableContextWrapper
@@ -14,6 +15,7 @@ import android.webkit.DownloadListener
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.URLUtil
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -21,6 +23,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -119,6 +123,23 @@ fun ZCodeWebView(
             }.getOrNull()
         }
         view.evaluateJavascript(themeScript(dark), null)
+    }
+
+    // The Remote page's attachment upload (<input type=file>) only works if the host
+    // answers WebChromeClient.onShowFileChooser. The picker result may arrive after the
+    // WebView was re-parented/re-created, so the pending ValueCallback rides on the view
+    // tag (the retained WebView survives that) and the live view is tracked here.
+    val activeWebView = remember { arrayOf<WebView?>(null) }
+    val fileChooserLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val view = activeWebView[0]
+        val pending = view?.getTag(R.id.zcode_webview_file_callback) as? ValueCallback<Array<Uri>>
+        view?.setTag(R.id.zcode_webview_file_callback, null)
+        log.log("file chooser result code=${result.resultCode} ${if (pending == null) "no callback" else "delivered"}")
+        pending?.onReceiveValue(
+            WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+        )
     }
 
     DisposableEffect(Unit) {
@@ -251,6 +272,33 @@ fun ZCodeWebView(
                         return true
                     }
 
+                    override fun onShowFileChooser(
+                        view: WebView?,
+                        filePathCallback: ValueCallback<Array<Uri>>?,
+                        fileChooserParams: FileChooserParams?,
+                    ): Boolean {
+                        // Release a picker abandoned mid-flight (page reloaded, second tap);
+                        // an unreleased callback makes every later upload silently die.
+                        (view?.getTag(R.id.zcode_webview_file_callback) as? ValueCallback<Array<Uri>>)
+                            ?.onReceiveValue(null)
+                        view?.setTag(R.id.zcode_webview_file_callback, filePathCallback)
+                        val accept = fileChooserParams?.acceptTypes.orEmpty().filter { it.isNotBlank() }
+                        log.log("file chooser accept=${accept.joinToString(",").take(60)}")
+                        val intent = fileChooserParams?.createIntent()
+                            ?: Intent(Intent.ACTION_GET_CONTENT)
+                                .addCategory(Intent.CATEGORY_OPENABLE)
+                                .setType("*/*")
+                        return try {
+                            fileChooserLauncher.launch(intent)
+                            true
+                        } catch (e: ActivityNotFoundException) {
+                            log.log("file chooser: no activity handles the picker")
+                            view?.setTag(R.id.zcode_webview_file_callback, null)
+                            filePathCallback?.onReceiveValue(null)
+                            false
+                        }
+                    }
+
                     override fun onCreateWindow(
                         view: WebView?,
                         isDialog: Boolean,
@@ -280,6 +328,7 @@ fun ZCodeWebView(
                     val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
                     onDownload(url, name, mimeType)
                 })
+                activeWebView[0] = this
                 webViewRef(this)
                 val current = url
                 if (current.isNullOrBlank() || current == "about:blank") {
