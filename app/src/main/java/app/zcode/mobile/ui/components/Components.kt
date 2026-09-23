@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -26,6 +27,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,14 +38,17 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import app.zcode.mobile.ui.theme.ZTheme
 
 val PageInset = 20.dp
@@ -379,5 +387,68 @@ fun ErrorPanel(
         Spacer(Modifier.height(4.dp))
         PrimaryButton(text = primary.first, onClick = primary.second)
         if (secondary != null) SecondaryButton(text = secondary.first, onClick = secondary.second)
+    }
+}
+
+/**
+ * Rename dialog for a saved desktop. Blank names keep the current one;
+ * [hostHint] shows under the field so duplicate defaults stay distinguishable.
+ */
+@Composable
+fun RenameDeviceDialog(
+    initialName: String,
+    hostHint: String? = null,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    val c = ZTheme.colors
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    Dialog(onDismissRequest = onDismiss) {
+        Panel(modifier = Modifier.width(320.dp), padding = 20.dp) {
+            Text("重命名设备", color = c.fg, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(14.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, c.line, ButtonShape)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                BasicTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    singleLine = true,
+                    textStyle = TextStyle(color = c.fg, fontSize = 14.sp),
+                    cursorBrush = SolidColor(c.fg),
+                )
+            }
+            if (hostHint != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(hostHint, color = c.fgTertiary, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Text(
+                    "取消",
+                    color = c.fgSecondary,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "保存",
+                    color = if (name.trim().isBlank()) c.fgTertiary else c.fg,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable(enabled = name.trim().isNotBlank()) {
+                            onConfirm(name.trim())
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+        }
     }
 }

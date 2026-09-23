@@ -76,6 +76,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     val device: StateFlow<Device?> = remoteManager.device
+
+    /** All saved ZCode Desktops; [device] is the active entry of this list. */
+    val devices: StateFlow<List<Device>> = remoteManager.devices
     val online: StateFlow<Boolean> = networkMonitor.online.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
@@ -159,18 +162,48 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveConnection(url: String): Boolean {
         if (!RemoteUrl.isValid(url)) return false
-        remoteManager.save(url, "ZCode Desktop")
+        val changed = remoteManager.addOrActivate(url)
+        if (changed) resetSessionState()
         return true
     }
 
-    fun disconnect(clearWeb: Boolean = false) {
+    fun renameDevice(id: String, name: String) {
+        remoteManager.rename(id, name)
+    }
+
+    /** One-tap switch to another saved desktop. True when the active device actually changed. */
+    fun switchDevice(id: String): Boolean {
+        val changed = remoteManager.switchTo(id)
+        if (changed) resetSessionState()
+        return changed
+    }
+
+    /** Removes a saved device. True when the active one was removed (a successor took over, if any). */
+    fun removeDevice(id: String): Boolean {
+        val wasActive = remoteManager.remove(id)
+        if (wasActive) resetSessionState()
+        return wasActive
+    }
+
+    /** Removes every saved device and all WebView data; used by Settings「清除全部连接」. */
+    fun clearAllConnections() {
         webView?.stopLoading()
+        remoteManager.clearAll(clearWebData = true)
+        webView?.clearCache(true)
         _pageState.value = RemotePageState.Idle
-        if (clearWeb) {
-            webView?.destroy()
-            webView = null
-        }
-        remoteManager.disconnect(clearWeb)
+        clearEvents()
+    }
+
+    /**
+     * Leaves nothing of the previous desktop behind: cookies and WebStorage are wiped (cookies
+     * are port-agnostic, so two desktops on one host would otherwise share sessions), and the
+     * observed tasks/approvals belong to the old device. The WebView itself reloads because
+     * its config.remoteUrl changes with the active device.
+     */
+    private fun resetSessionState() {
+        webView?.stopLoading()
+        sessionManager.clear()
+        _pageState.value = RemotePageState.Idle
         clearEvents()
     }
 

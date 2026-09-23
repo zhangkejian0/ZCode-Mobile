@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import app.zcode.mobile.model.Device
 import app.zcode.mobile.util.AppLog
 import java.io.File
 import java.security.KeyStore
@@ -15,58 +16,105 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * Remote URL and device name are encrypted with AES-GCM.
+ * Saved devices and the active device id are encrypted with AES-GCM.
  * The key lives in Android Keystore and never leaves the device.
+ * Reads migrate the pre-multi-device single-connection payload transparently.
  */
 class SecureStorage(context: Context) {
     private val lock = ReentrantLock()
     private val file = File(context.applicationContext.filesDir, FILE_NAME)
-    private val cache: Payload = lock.withLock { readUnlocked() }
+    // Guarded by [lock]; replaced wholesale because DeviceStore is immutable.
+    private var cache: DeviceStore = lock.withLock { readUnlocked() }
 
-    var remoteUrl: String?
-        get() = lock.withLock { cache.remoteUrl }
-        set(value) {
-            lock.withLock {
-                cache.remoteUrl = value
-                writeUnlocked()
-            }
-        }
+    fun devices(): List<Device> = lock.withLock { cache.devices.toList() }
 
-    var deviceName: String
-        get() = lock.withLock { cache.deviceName.ifBlank { "ZCode Desktop" } }
-        set(value) {
-            lock.withLock {
-                cache.deviceName = value
-                writeUnlocked()
-            }
-        }
+    fun activeId(): String? = lock.withLock { cache.activeId }
 
-    fun clearConnection() {
+    /** Inserts or updates a device (matched by id) and makes it the active one. */
+    fun upsert(device: Device) {
         lock.withLock {
-            cache.remoteUrl = null
-            cache.deviceName = "ZCode Desktop"
-            writeUnlocked()
+            val others = cache.devices.filter { it.id != device.id }
+            val updated = Device(id = device.id, name = device.name, remoteUrl = device.remoteUrl)
+            writeUnlocked(DeviceStore(devices = others + updated, activeId = device.id))
         }
     }
 
-    private fun readUnlocked(): Payload {
-        if (!file.exists()) return Payload()
+    /** Inserts or updates a device matched by exact URL (a re-scanned link refreshes the entry). */
+    fun upsertByUrl(remoteUrl: String, name: String): Device {
+        lock.withLock {
+            val existing = cache.devices.firstOrNull { it.remoteUrl == remoteUrl }
+            val device = Device(
+                id = existing?.id ?: newId(),
+                name = existing?.name?.takeIf { it != "ZCode Desktop" } ?: name,
+                remoteUrl = remoteUrl,
+            )
+            val others = cache.devices.filter { it.id != device.id }
+            writeUnlocked(DeviceStore(devices = others + device, activeId = device.id))
+            return device
+        }
+    }
+
+    fun setActive(id: String): Boolean {
+        lock.withLock {
+            if (cache.devices.none { it.id == id }) return false
+            if (cache.activeId == id) return true
+            writeUnlocked(cache.copy(activeId = id))
+            return true
+        }
+    }
+
+    /** Removes a device. Returns true if it was the active one; the successor becomes active. */
+    fun remove(id: String): Boolean {
+        lock.withLock {
+            val remaining = cache.devices.filter { it.id != id }
+            if (remaining.size == cache.devices.size) return false
+            val wasActive = cache.activeId == id
+            val nextActive = if (wasActive) remaining.firstOrNull()?.id else cache.activeId
+            writeUnlocked(DeviceStore(devices = remaining, activeId = nextActive))
+            return wasActive
+        }
+    }
+
+    /** Renames a device (blank keeps the old name); true when the device existed. */
+    fun rename(id: String, newName: String): Boolean {
+        lock.withLock {
+            val index = cache.devices.indexOfFirst { it.id == id }
+            if (index < 0) return false
+            val trimmed = newName.trim()
+            if (trimmed.isNotEmpty() && trimmed != cache.devices[index].name) {
+                val updated = cache.devices[index].copy(name = trimmed)
+                writeUnlocked(
+                    DeviceStore(
+                        devices = cache.devices.toMutableList().also { it[index] = updated },
+                        activeId = cache.activeId,
+                    ),
+                )
+            }
+            return true
+        }
+    }
+
+    fun clearAll() {
+        lock.withLock { writeUnlocked(DeviceStore()) }
+    }
+
+    private fun readUnlocked(): DeviceStore {
+        if (!file.exists()) return DeviceStore()
         return try {
             val decoded = Base64.decode(file.readText(), Base64.NO_WRAP)
-            val (iv, cipherBytes) = SecurePayloadCodec.unpack(decoded, IV_SIZE) ?: return Payload()
+            val (iv, cipherBytes) = SecurePayloadCodec.unpack(decoded, IV_SIZE) ?: return DeviceStore()
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
-            val (remoteUrl, deviceName) = SecurePayloadCodec.decodeJson(String(cipher.doFinal(cipherBytes), Charsets.UTF_8))
-            Payload(remoteUrl = remoteUrl, deviceName = deviceName)
+            SecurePayloadCodec.decodeStore(String(cipher.doFinal(cipherBytes), Charsets.UTF_8))
         } catch (t: Throwable) {
             AppLog.e(TAG, "failed to read secure payload", t)
-            Payload()
+            DeviceStore()
         }
     }
 
-    private fun writeUnlocked() {
+    private fun writeUnlocked(store: DeviceStore) {
         try {
-            val json = SecurePayloadCodec.encodeJson(cache.remoteUrl, cache.deviceName)
+            val json = SecurePayloadCodec.encodeStore(store)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
             val encrypted = cipher.doFinal(json.toByteArray(Charsets.UTF_8))
@@ -75,6 +123,7 @@ class SecureStorage(context: Context) {
         } catch (t: Throwable) {
             AppLog.e(TAG, "failed to write secure payload", t)
         }
+        cache = store
     }
 
     private fun getOrCreateKey(): SecretKey {
@@ -94,11 +143,6 @@ class SecureStorage(context: Context) {
         return generator.generateKey()
     }
 
-    private class Payload(
-        var remoteUrl: String? = null,
-        var deviceName: String = "ZCode Desktop",
-    )
-
     companion object {
         private const val TAG = "SecureStorage"
         private const val FILE_NAME = "zcode_secure.enc"
@@ -107,5 +151,7 @@ class SecureStorage(context: Context) {
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val IV_SIZE = 12
         private const val GCM_TAG_BITS = 128
+
+        private fun newId(): String = java.util.UUID.randomUUID().toString()
     }
 }

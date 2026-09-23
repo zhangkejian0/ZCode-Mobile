@@ -12,8 +12,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -25,8 +31,10 @@ import app.zcode.mobile.data.SettingsStore
 import app.zcode.mobile.model.Device
 import app.zcode.mobile.ui.components.GroupLabel
 import app.zcode.mobile.ui.components.Hairline
+import app.zcode.mobile.ui.components.IconButtonCircle
 import app.zcode.mobile.ui.components.ListRow
 import app.zcode.mobile.ui.components.PageInset
+import app.zcode.mobile.ui.components.RenameDeviceDialog
 import app.zcode.mobile.ui.components.ScreenHeader
 import app.zcode.mobile.ui.components.Segmented
 import app.zcode.mobile.ui.components.ToggleRow
@@ -37,10 +45,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     device: Device?,
+    devices: List<Device> = emptyList(),
     settings: AppSettings,
     store: SettingsStore,
     onBack: () -> Unit,
     onReconnect: () -> Unit,
+    onSwitchDevice: (String) -> Unit = {},
+    onRenameDevice: (String, String) -> Unit = { _, _ -> },
     onClearConnection: () -> Unit,
     onClearWebData: () -> Unit,
     onDemoNotification: () -> Unit,
@@ -61,6 +72,7 @@ fun SettingsScreen(
         }
     }
     val developer = BuildConfig.DEBUG || settings.developerMode
+    var renaming by remember { mutableStateOf<Device?>(null) }
 
     Column(modifier = Modifier.fillMaxSize().background(c.surface)) {
         ScreenHeader(title = "设置", onBack = onBack)
@@ -71,14 +83,35 @@ fun SettingsScreen(
                 .padding(horizontal = PageInset),
         ) {
             GroupLabel("设备")
-            ListRow(
-                title = device?.name ?: "未连接",
-                caption = device?.remoteUrl?.let { RemoteUrl.redacted(it) },
-            )
+            if (devices.isEmpty()) {
+                ListRow(
+                    title = device?.name ?: "未连接",
+                    caption = device?.remoteUrl?.let { RemoteUrl.redacted(it) },
+                )
+            } else {
+                devices.forEachIndexed { index, saved ->
+                    if (index > 0) Hairline()
+                    ListRow(
+                        title = saved.name,
+                        caption = RemoteUrl.redacted(saved.remoteUrl),
+                        meta = if (saved.id == device?.id) "当前" else "点击切换",
+                        onClick = { onSwitchDevice(saved.id) },
+                        trailing = {
+                            IconButtonCircle(
+                                Icons.Outlined.Edit,
+                                contentDescription = "重命名 ${saved.name}",
+                                tint = c.fgTertiary,
+                                size = 32.dp,
+                                onClick = { renaming = saved },
+                            )
+                        },
+                    )
+                }
+            }
             Hairline()
             ListRow(title = "重新连接", chevron = true, onClick = onReconnect)
             Hairline()
-            ListRow(title = "清除连接", caption = "删除已保存的 Remote 链接", titleColor = c.danger, onClick = onClearConnection)
+            ListRow(title = "清除全部连接", caption = "删除所有已保存的设备", titleColor = c.danger, onClick = onClearConnection)
 
             GroupLabel("通知")
             ToggleRow("任务完成", settings.taskNotifications, caption = "任务完成或失败时提醒") {
@@ -154,5 +187,17 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(32.dp))
         }
+    }
+
+    renaming?.let { target ->
+        RenameDeviceDialog(
+            initialName = target.name,
+            hostHint = RemoteUrl.displayHost(target.remoteUrl),
+            onDismiss = { renaming = null },
+            onConfirm = { name ->
+                onRenameDevice(target.id, name)
+                renaming = null
+            },
+        )
     }
 }

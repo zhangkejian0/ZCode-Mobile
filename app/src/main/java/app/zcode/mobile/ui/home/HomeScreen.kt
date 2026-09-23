@@ -1,6 +1,7 @@
 package app.zcode.mobile.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,8 +21,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -64,6 +70,7 @@ import java.util.Calendar
 @Composable
 fun HomeScreen(
     device: Device?,
+    devices: List<Device> = emptyList(),
     connection: ConnectionState,
     tasks: List<Task>,
     onOpenRemote: () -> Unit,
@@ -73,6 +80,7 @@ fun HomeScreen(
     onVoice: () -> Unit,
     onReconnect: () -> Unit,
     onChangeDevice: () -> Unit,
+    onSwitchDevice: (String) -> Unit = {},
     onSettings: () -> Unit,
     voiceEnabled: Boolean = true,
     observerSlot: @Composable () -> Unit = {},
@@ -109,7 +117,7 @@ fun HomeScreen(
             },
         ) { observerSlot() }
 
-        // Top bar: wordmark left, connection + settings right.
+        // Top bar: wordmark left, device switcher + settings right.
         Row(
             modifier = Modifier.fillMaxWidth().height(52.dp).padding(start = PageInset, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -118,7 +126,21 @@ fun HomeScreen(
             Spacer(Modifier.size(8.dp))
             Text("ZCode", color = c.fg, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.weight(1f))
-            StatusText(text = connectionLabel(connection), color = connectionColor(connection, c.success, c.attention, c.danger, c.fgTertiary))
+            if (devices.isNotEmpty()) {
+                DeviceSwitcher(
+                    devices = devices,
+                    activeDevice = device,
+                    connectionLabel = connectionLabel(connection),
+                    connectionColor = connectionColor(connection, c.success, c.attention, c.danger, c.fgTertiary),
+                    onSwitchDevice = onSwitchDevice,
+                    onAddDevice = onChangeDevice,
+                )
+            } else {
+                StatusText(
+                    text = connectionLabel(connection),
+                    color = connectionColor(connection, c.success, c.attention, c.danger, c.fgTertiary),
+                )
+            }
             Spacer(Modifier.size(4.dp))
             IconButtonCircle(Icons.Outlined.Settings, contentDescription = "设置", onClick = onSettings, tint = c.fgSecondary)
         }
@@ -202,6 +224,69 @@ fun HomeScreen(
                 )
             }
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+/** Top-bar menu: one tap switches the active desktop, plus an entry to add another one. */
+@Composable
+private fun DeviceSwitcher(
+    devices: List<Device>,
+    activeDevice: Device?,
+    connectionLabel: String,
+    connectionColor: Color,
+    onSwitchDevice: (String) -> Unit,
+    onAddDevice: () -> Unit,
+) {
+    val c = ZTheme.colors
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .clickable(onClick = { open = true })
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusText(text = connectionLabel, color = connectionColor)
+            Spacer(Modifier.size(2.dp))
+            Icon(
+                imageVector = Icons.Outlined.ExpandMore,
+                contentDescription = "切换设备",
+                tint = c.fgTertiary,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = c.surface) {
+            devices.forEach { saved ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(saved.name, color = c.fg, fontSize = 14.sp)
+                            Text(
+                                RemoteUrl.displayHost(saved.remoteUrl),
+                                color = c.fgTertiary,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    },
+                    trailingIcon = if (saved.id == activeDevice?.id) {
+                        { Icon(Icons.Outlined.Check, contentDescription = "当前设备", tint = c.fgSecondary, modifier = Modifier.size(16.dp)) }
+                    } else {
+                        null
+                    },
+                    onClick = {
+                        open = false
+                        if (saved.id != activeDevice?.id) onSwitchDevice(saved.id)
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("添加设备…", color = c.fgSecondary, fontSize = 14.sp) },
+                onClick = {
+                    open = false
+                    onAddDevice()
+                },
+            )
         }
     }
 }

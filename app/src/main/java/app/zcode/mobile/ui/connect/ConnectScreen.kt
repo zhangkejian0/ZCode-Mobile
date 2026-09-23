@@ -21,6 +21,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,11 +41,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.zcode.mobile.model.Device
+import app.zcode.mobile.ui.components.GroupLabel
 import app.zcode.mobile.ui.components.Hairline
 import app.zcode.mobile.ui.components.IconButtonCircle
 import app.zcode.mobile.ui.components.ListRow
 import app.zcode.mobile.ui.components.PageInset
 import app.zcode.mobile.ui.components.Panel
+import app.zcode.mobile.ui.components.RenameDeviceDialog
 import app.zcode.mobile.ui.components.RoundAction
 import app.zcode.mobile.ui.components.ZOutline
 import app.zcode.mobile.ui.theme.ZTheme
@@ -52,14 +57,20 @@ import app.zcode.mobile.util.RemoteUrl
 @Composable
 fun ConnectScreen(
     initialUrl: String? = null,
+    devices: List<Device> = emptyList(),
+    activeDeviceId: String? = null,
     onScan: () -> Unit,
     onConnect: (String) -> Boolean,
+    onSwitchDevice: (String) -> Unit = {},
+    onRemoveDevice: (String) -> Unit = {},
+    onRenameDevice: (String, String) -> Unit = { _, _ -> },
 ) {
     val c = ZTheme.colors
     val context = LocalContext.current
     var url by remember { mutableStateOf(initialUrl.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
     var showPaste by remember { mutableStateOf(!initialUrl.isNullOrBlank()) }
+    var renaming by remember { mutableStateOf<Device?>(null) }
 
     LaunchedEffect(initialUrl) {
         if (!initialUrl.isNullOrBlank()) {
@@ -106,6 +117,48 @@ fun ConnectScreen(
         Hairline()
         ListRow(title = "粘贴连接地址", caption = "电脑端点「复制链接」后粘贴到这里", chevron = true, onClick = { showPaste = true })
         Hairline()
+
+        if (devices.isNotEmpty()) {
+            Spacer(Modifier.height(28.dp))
+            GroupLabel("已保存的设备")
+            devices.forEachIndexed { index, saved ->
+                if (index > 0) Hairline()
+                ListRow(
+                    title = saved.name,
+                    caption = RemoteUrl.redacted(saved.remoteUrl),
+                    meta = if (saved.id == activeDeviceId) "当前" else null,
+                    onClick = { onSwitchDevice(saved.id) },
+                    trailing = {
+                        IconButtonCircle(
+                            Icons.Outlined.Edit,
+                            contentDescription = "重命名 ${saved.name}",
+                            tint = c.fgTertiary,
+                            size = 32.dp,
+                            onClick = { renaming = saved },
+                        )
+                        IconButtonCircle(
+                            Icons.Outlined.Delete,
+                            contentDescription = "删除 ${saved.name}",
+                            tint = c.fgTertiary,
+                            size = 32.dp,
+                            onClick = { onRemoveDevice(saved.id) },
+                        )
+                    },
+                )
+            }
+        }
+
+        renaming?.let { target ->
+            RenameDeviceDialog(
+                initialName = target.name,
+                hostHint = RemoteUrl.displayHost(target.remoteUrl),
+                onDismiss = { renaming = null },
+                onConfirm = { name ->
+                    onRenameDevice(target.id, name)
+                    renaming = null
+                },
+            )
+        }
 
         if (showPaste) {
             Spacer(Modifier.height(24.dp))

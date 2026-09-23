@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
                 }
                 val nav = rememberNavController()
                 val device by appViewModel.device.collectAsStateWithLifecycle()
+                val devices by appViewModel.devices.collectAsStateWithLifecycle()
                 val settings by appViewModel.settings.collectAsStateWithLifecycle()
                 val online by appViewModel.online.collectAsStateWithLifecycle()
                 val pendingInject by appViewModel.pendingInject.collectAsStateWithLifecycle()
@@ -151,6 +152,8 @@ class MainActivity : ComponentActivity() {
                     composable(Routes.Connect) {
                         ConnectScreen(
                             initialUrl = scannedUrl,
+                            devices = devices,
+                            activeDeviceId = device?.id,
                             onScan = { nav.navigate(Routes.QrScan) },
                             onConnect = { url ->
                                 val ok = appViewModel.saveConnection(url)
@@ -162,6 +165,14 @@ class MainActivity : ComponentActivity() {
                                 }
                                 ok
                             },
+                            onSwitchDevice = { id ->
+                                appViewModel.switchDevice(id)
+                                nav.navigate(Routes.Home) {
+                                    popUpTo(Routes.Connect) { inclusive = true }
+                                }
+                            },
+                            onRemoveDevice = { id -> appViewModel.removeDevice(id) },
+                            onRenameDevice = { id, name -> appViewModel.renameDevice(id, name) },
                         )
                     }
                     composable(Routes.QrScan) {
@@ -178,6 +189,7 @@ class MainActivity : ComponentActivity() {
                         val sortedTasks = remember(tasks) { appViewModel.events.sortedTasks(tasks) }
                         HomeScreen(
                             device = device,
+                            devices = devices,
                             connection = connection,
                             tasks = sortedTasks,
                             onOpenRemote = { nav.navigate(Routes.Remote) },
@@ -204,6 +216,7 @@ class MainActivity : ComponentActivity() {
                                 nav.navigate(Routes.Remote)
                             },
                             onChangeDevice = { nav.navigate(Routes.Connect) },
+                            onSwitchDevice = { id -> appViewModel.switchDevice(id) },
                             onSettings = { nav.navigate(Routes.Settings) },
                             voiceEnabled = settings.voiceEnabled,
                             observerSlot = {
@@ -274,9 +287,16 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onDisconnect = {
-                                    appViewModel.disconnect(clearWeb = false)
-                                    nav.navigate(Routes.Connect) {
-                                        popUpTo(0) { inclusive = true }
+                                    // 断开连接 removes only the active desktop; others stay saved.
+                                    device?.let { appViewModel.removeDevice(it.id) }
+                                    if (devices.none { it.id != device?.id }) {
+                                        nav.navigate(Routes.Connect) {
+                                            popUpTo(0) { inclusive = true }
+                                        }
+                                    } else {
+                                        nav.navigate(Routes.Home) {
+                                            popUpTo(Routes.Remote) { inclusive = true }
+                                        }
                                     }
                                 },
                                 onReconnect = {
@@ -360,12 +380,15 @@ class MainActivity : ComponentActivity() {
                     composable(Routes.Settings) {
                         SettingsScreen(
                             device = device,
+                            devices = devices,
                             settings = settings,
                             store = appViewModel.settingsStore,
                             onBack = { nav.popBackStack() },
                             onReconnect = { nav.navigate(Routes.Remote) },
+                            onSwitchDevice = { id -> appViewModel.switchDevice(id) },
+                            onRenameDevice = { id, name -> appViewModel.renameDevice(id, name) },
                             onClearConnection = {
-                                appViewModel.disconnect(clearWeb = true)
+                                appViewModel.clearAllConnections()
                                 nav.navigate(Routes.Connect) {
                                     popUpTo(0) { inclusive = true }
                                 }

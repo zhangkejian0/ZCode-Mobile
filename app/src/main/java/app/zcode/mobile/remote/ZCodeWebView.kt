@@ -283,12 +283,21 @@ fun ZCodeWebView(
                 webViewRef(this)
                 val current = url
                 if (current.isNullOrBlank() || current == "about:blank") {
+                    setTag(R.id.zcode_webview_loaded_url, config.remoteUrl)
                     loadUrl(config.remoteUrl)
                 }
             }
         },
         update = { view ->
             webViewRef(view)
+            // The retained WebView outlives device switches; when the active desktop changes
+            // (config.remoteUrl), load the new one. The tag only tracks URLs we loaded here, so
+            // in-page redirects never trigger a reload.
+            if (view.getTag(R.id.zcode_webview_loaded_url) != config.remoteUrl) {
+                view.setTag(R.id.zcode_webview_loaded_url, config.remoteUrl)
+                log.log("device switch, loading ${RemoteUrl.redacted(config.remoteUrl)}")
+                view.loadUrl(config.remoteUrl)
+            }
             if (view.getTag(R.id.zcode_webview_theme) != config.darkTheme) {
                 view.setTag(R.id.zcode_webview_theme, config.darkTheme)
                 applyTheme(view, config.darkTheme)
