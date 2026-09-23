@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "ZCode Mobile 主模块"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "ZCode Mobile"
+    },
+    {
+      "name": "ability_desc",
+      "value": "ZCode Mobile 远程控制客户端"
+    },
+    {
+      "name": "Index_title",
+      "value": "ZCode"
+    }
+  ]
+}
